@@ -161,7 +161,7 @@ export function renderMainTemplate(
         </div>
       </div>
 
-      <section >
+      <section class="flex flex-1 flex-col">
         <div id="main-tabs" class="tabs tabs-border tabs-medium">
           <input
             type="radio"

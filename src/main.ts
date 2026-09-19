@@ -141,6 +141,7 @@ let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
 let activeTabSwipeTouchId: number | null = null;
 let tabSwipeStartX = 0;
 let tabSwipeStartY = 0;
+let suppressClickAfterSwipe = false;
 
 function loadGeneratorModule() {
   generatorModulePromise ??= import("@/components/generator");
@@ -1038,6 +1039,7 @@ function bindTabSwipeGesture() {
     "touchstart",
     (event) => {
       resetTabSwipeGesture();
+      suppressClickAfterSwipe = false;
 
       if (event.touches.length !== 1) {
         return;
@@ -1094,13 +1096,32 @@ function bindTabSwipeGesture() {
       }
 
       // Swallow the click that would otherwise fire on the origin control.
-      event.preventDefault();
+      // Browsers make touchend non-cancelable once scrolling has started, so the
+      // captured click listener below is the reliable fallback.
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      suppressClickAfterSwipe = true;
       switchTabBySwipe(deltaX < 0 ? "next" : "previous");
     },
     { passive: false },
   );
 
   tabsRoot.addEventListener("touchcancel", resetTabSwipeGesture, { passive: true });
+
+  tabsRoot.addEventListener(
+    "click",
+    (event) => {
+      if (!suppressClickAfterSwipe) {
+        return;
+      }
+
+      suppressClickAfterSwipe = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    { capture: true },
+  );
 }
 
 function findActiveSwipeTouch(touches: TouchList) {

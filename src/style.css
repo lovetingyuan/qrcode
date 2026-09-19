@@ -30,7 +30,10 @@ html[data-theme="dracula"] {
 }
 
 body {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   padding-top: max(20px, env(safe-area-inset-top));
   padding-right: max(16px, env(safe-area-inset-right));
   padding-bottom: max(32px, env(safe-area-inset-bottom));
@@ -38,12 +41,22 @@ body {
 }
 
 #app {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   width: min(100%, 760px);
   margin: 0 auto;
 }
 
-/* Keep the swipe transition from bleeding past the viewport edge. */
+#app > main {
+  flex: 1;
+}
+
+/* Fill the remaining page so the whole lower screen can be swiped, while
+   keeping the swipe transition from bleeding past the viewport edge. */
 #main-tabs {
+  flex: 1 1 auto;
+  align-content: flex-start;
   overflow-x: hidden;
   overflow-x: clip;
 }
