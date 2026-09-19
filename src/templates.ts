@@ -162,7 +162,7 @@ export function renderMainTemplate(
       </div>
 
       <section >
-        <div class="tabs tabs-border tabs-medium">
+        <div id="main-tabs" class="tabs tabs-border tabs-medium">
           <input
             type="radio"
             name="qr_tabs"

@@ -14,6 +14,20 @@ import { renderMainTemplate, renderOnboardingTemplate } from "./templates";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const DEFAULT_SCANNER_ASPECT_RATIO = 16 / 9;
+const TAB_SWIPE_MIN_DISTANCE = 56;
+const TAB_SWIPE_DOMINANCE_RATIO = 1.35;
+const TAB_SWIPE_EDGE_GUARD = 20;
+const NON_TEXT_INPUT_TYPES = new Set([
+  "button",
+  "checkbox",
+  "color",
+  "file",
+  "image",
+  "radio",
+  "range",
+  "reset",
+  "submit",
+]);
 const THEME_META_COLORS: Record<SupportedTheme, string> = {
   emerald: "#0b5d4c",
   dracula: "#282a36",
@@ -93,6 +107,7 @@ interface MainElements {
   copyImageBtn: HTMLButtonElement;
   downloadImageBtn: HTMLButtonElement;
   cameraHint: HTMLDivElement;
+  tabsRoot: HTMLDivElement;
   tabs: HTMLInputElement[];
 }
 
@@ -123,6 +138,9 @@ let generatorModulePromise: Promise<GeneratorModule> | null = null;
 let scannerModulePromise: Promise<ScannerModule> | null = null;
 let scannerInstance: QRScannerController | null = null;
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
+let activeTabSwipeTouchId: number | null = null;
+let tabSwipeStartX = 0;
+let tabSwipeStartY = 0;
 
 function loadGeneratorModule() {
   generatorModulePromise ??= import("@/components/generator");
@@ -903,6 +921,7 @@ function getMainElements(): MainElements {
     copyImageBtn: document.querySelector<HTMLButtonElement>("#copy-image-btn")!,
     downloadImageBtn: document.querySelector<HTMLButtonElement>("#download-image-btn")!,
     cameraHint: document.querySelector<HTMLDivElement>("#camera-hint")!,
+    tabsRoot: document.querySelector<HTMLDivElement>("#main-tabs")!,
     tabs: Array.from(document.querySelectorAll<HTMLInputElement>('input[name="qr_tabs"]')),
   };
 }
@@ -924,6 +943,178 @@ function syncMainViewFromState() {
   } else {
     clearScanResult();
   }
+}
+
+function resetTabSwipeGesture() {
+  activeTabSwipeTouchId = null;
+  tabSwipeStartX = 0;
+  tabSwipeStartY = 0;
+}
+
+function canStartTabSwipe(target: EventTarget | null, clientX: number) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  // Modal dialogs own their own gestures.
+  if (target.closest("dialog")) {
+    return false;
+  }
+
+  // Let text fields, selects and editable content keep their own drag behavior.
+  const control = target.closest("textarea, input, select, [contenteditable='true']");
+  if (control && isTextEntryControl(control)) {
+    return false;
+  }
+
+  // Fullscreen scanner/QR views own the whole screen gesture surface.
+  if (document.fullscreenElement) {
+    return false;
+  }
+
+  // Leave room for the system back-swipe gesture near screen edges.
+  return clientX > TAB_SWIPE_EDGE_GUARD && clientX < window.innerWidth - TAB_SWIPE_EDGE_GUARD;
+}
+
+function isTextEntryControl(element: Element) {
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    return true;
+  }
+
+  return element instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(element.type);
+}
+
+function animateTabContentEntry(tab: HTMLInputElement, direction: "next" | "previous") {
+  const content = tab.nextElementSibling;
+  if (!(content instanceof HTMLElement) || !content.classList.contains("tab-content")) {
+    return;
+  }
+
+  if (!window.matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+    return;
+  }
+
+  const enterClass =
+    direction === "next" ? "tab-content-enter-from-right" : "tab-content-enter-from-left";
+  content.classList.remove("tab-content-enter-from-right", "tab-content-enter-from-left");
+  void content.offsetWidth;
+  content.classList.add(enterClass);
+
+  const cleanup = () => content.classList.remove(enterClass);
+  content.addEventListener("animationend", cleanup, { once: true });
+  window.setTimeout(cleanup, 400);
+}
+
+function switchTabBySwipe(direction: "next" | "previous") {
+  if (!mainElements) {
+    return;
+  }
+
+  const tabs = mainElements.tabs;
+  const currentIndex = Math.max(
+    tabs.findIndex((tab) => tab.checked),
+    0,
+  );
+  const targetIndex = currentIndex + (direction === "next" ? 1 : -1);
+  const targetTab = tabs[targetIndex];
+
+  if (!targetTab || targetTab.checked) {
+    return;
+  }
+
+  targetTab.checked = true;
+  targetTab.dispatchEvent(new Event("change", { bubbles: true }));
+  animateTabContentEntry(targetTab, direction);
+}
+
+function bindTabSwipeGesture() {
+  if (!mainElements) {
+    return;
+  }
+
+  const tabsRoot = mainElements.tabsRoot;
+
+  tabsRoot.addEventListener(
+    "touchstart",
+    (event) => {
+      resetTabSwipeGesture();
+
+      if (event.touches.length !== 1) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!canStartTabSwipe(event.target, touch.clientX)) {
+        return;
+      }
+
+      activeTabSwipeTouchId = touch.identifier;
+      tabSwipeStartX = touch.clientX;
+      tabSwipeStartY = touch.clientY;
+    },
+    { passive: true },
+  );
+
+  tabsRoot.addEventListener(
+    "touchmove",
+    (event) => {
+      const touch = findActiveSwipeTouch(event.changedTouches);
+      if (!touch) {
+        return;
+      }
+
+      const deltaX = touch.clientX - tabSwipeStartX;
+      const deltaY = touch.clientY - tabSwipeStartY;
+
+      // A vertical drag means the user is scrolling, not switching tabs.
+      if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 16) {
+        resetTabSwipeGesture();
+      }
+    },
+    { passive: true },
+  );
+
+  tabsRoot.addEventListener(
+    "touchend",
+    (event) => {
+      const touch = findActiveSwipeTouch(event.changedTouches);
+      if (!touch) {
+        return;
+      }
+
+      const deltaX = touch.clientX - tabSwipeStartX;
+      const deltaY = touch.clientY - tabSwipeStartY;
+      resetTabSwipeGesture();
+
+      const travelsFarEnough = Math.abs(deltaX) >= TAB_SWIPE_MIN_DISTANCE;
+      const isMostlyHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * TAB_SWIPE_DOMINANCE_RATIO;
+
+      if (!travelsFarEnough || !isMostlyHorizontal) {
+        return;
+      }
+
+      // Swallow the click that would otherwise fire on the origin control.
+      event.preventDefault();
+      switchTabBySwipe(deltaX < 0 ? "next" : "previous");
+    },
+    { passive: false },
+  );
+
+  tabsRoot.addEventListener("touchcancel", resetTabSwipeGesture, { passive: true });
+}
+
+function findActiveSwipeTouch(touches: TouchList) {
+  if (activeTabSwipeTouchId === null) {
+    return null;
+  }
+
+  for (const touch of Array.from(touches)) {
+    if (touch.identifier === activeTabSwipeTouchId) {
+      return touch;
+    }
+  }
+
+  return null;
 }
 
 function bindGlobalListeners() {
@@ -1268,6 +1459,7 @@ async function bindMainViewEvents() {
     });
   });
 
+  bindTabSwipeGesture();
   syncMainViewFromState();
   await syncCameraPermissionHint();
 

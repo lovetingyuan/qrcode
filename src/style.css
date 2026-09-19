@@ -42,10 +42,50 @@ body {
   margin: 0 auto;
 }
 
+/* Keep the swipe transition from bleeding past the viewport edge. */
+#main-tabs {
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
 .tabs input[type="radio"]:checked + .tab-content {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+@keyframes tab-content-enter-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes tab-content-enter-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tabs .tab-content.tab-content-enter-from-right {
+    animation: tab-content-enter-from-right 220ms ease-out;
+  }
+
+  .tabs .tab-content.tab-content-enter-from-left {
+    animation: tab-content-enter-from-left 220ms ease-out;
+  }
 }
 
 #gen-input {
